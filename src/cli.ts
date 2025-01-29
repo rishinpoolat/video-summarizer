@@ -47,8 +47,14 @@ async function summarizeLatestVideo(channelInput: string): Promise<void> {
     console.log(summary);
 
   } catch (error) {
-    logger.error('Error processing video:', error);
-    throw error;
+    if (error instanceof Error) {
+      logger.error('Error processing video:', error.message);
+      throw error;
+    } else {
+      const errorMessage = 'An unknown error occurred';
+      logger.error('Error processing video:', errorMessage);
+      throw new Error(errorMessage);
+    }
   } finally {
     // Cleanup browser instances
     await youtubeService.cleanup();
@@ -68,7 +74,8 @@ program
     try {
       await summarizeLatestVideo(channelName);
     } catch (error) {
-      console.error('Failed to summarize video:', error.message);
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      console.error('Failed to summarize video:', errorMessage);
       process.exit(1);
     }
   });
@@ -86,7 +93,8 @@ program
       try {
         await summarizeLatestVideo(channelName);
       } catch (error) {
-        logger.error('Failed to process scheduled summary:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        logger.error('Failed to process scheduled summary:', errorMessage);
       }
     });
   });

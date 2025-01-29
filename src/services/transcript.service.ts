@@ -94,6 +94,7 @@ export class TranscriptService {
         '#button-container ytd-button-renderer button'
       ];
 
+      let transcriptButtonFound = false;
       // Try each selector
       for (const selector of transcriptButtonSelectors) {
         try {
@@ -106,12 +107,17 @@ export class TranscriptService {
           if (button) {
             logger.info(`Found transcript button with selector: ${selector}`);
             await button.click();
+            transcriptButtonFound = true;
             break;
           }
         } catch (e) {
           logger.debug(`Selector ${selector} not found, trying next...`);
           continue;
         }
+      }
+
+      if (!transcriptButtonFound) {
+        throw new Error('Transcript button not found');
       }
 
       await this.delay(2000);
@@ -124,39 +130,38 @@ export class TranscriptService {
       
       // Extract transcript text
       logger.info('Extracting transcript...');
-      const transcript = await page.evaluate(() => {
-        // Debug logging
-        console.log('Starting transcript extraction...');
-        
-        // Get all transcript segments
+      const transcriptResult = await page.evaluate(() => {
         const segments = document.querySelectorAll('ytd-transcript-segment-renderer');
         
         if (!segments || segments.length === 0) {
-          console.log('No transcript segments found');
           return null;
         }
 
-        console.log(`Processing ${segments.length} transcript segments`);
-        return Array.from(segments)
-          .map(segment => {
-            // Explicitly target only the text content, ignoring timestamps
-            const textElement = segment.querySelector('.segment-text, [class*=\"text\"]:not([class*=\"timestamp\"])');
-            return textElement ? textElement.textContent?.trim() : '';
-          })
-          .filter(text => text.length > 0)
-          .join(' ');
+        const transcriptTexts: string[] = [];
+        segments.forEach(segment => {
+          const textElement = segment.querySelector('.segment-text, [class*=\"text\"]:not([class*=\"timestamp\"])');
+          if (textElement && textElement.textContent) {
+            const text = textElement.textContent.trim();
+            if (text) {
+              transcriptTexts.push(text);
+            }
+          }
+        });
+
+        return transcriptTexts.length > 0 ? transcriptTexts.join(' ') : null;
       });
 
-      if (!transcript) {
+      if (!transcriptResult) {
         logger.error('No transcript segments found');
         
         // Debug: Log the page content
         const debug = await page.evaluate(() => {
           const container = document.querySelector('.ytd-transcript-segment-list-renderer');
+          const bodyContent = document.body?.textContent;
           return {
             containerExists: !!container,
             containerHTML: container ? container.innerHTML : 'Not found',
-            bodyText: document.body.textContent.slice(0, 1000)
+            bodyTextSample: bodyContent ? bodyContent.slice(0, 1000) : 'No body content'
           };
         });
         
@@ -165,14 +170,19 @@ export class TranscriptService {
       }
 
       // Clean the transcript before returning
-      const cleanedTranscript = this.cleanTranscript(transcript);
+      const cleanedTranscript = this.cleanTranscript(transcriptResult);
+      
+      if (!cleanedTranscript) {
+        throw new Error('Failed to clean transcript');
+      }
       
       logger.info('Successfully extracted and cleaned transcript');
       return cleanedTranscript;
 
     } catch (error) {
-      logger.error('Error extracting transcript:', error);
-      throw new Error(`Failed to extract transcript: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      logger.error('Error extracting transcript:', errorMessage);
+      throw new Error(`Failed to extract transcript: ${errorMessage}`);
     } finally {
       await page.close();
     }

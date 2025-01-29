@@ -1,5 +1,5 @@
 // src/utils/puppeteer-manager.ts
-import puppeteer, { Browser, Page } from 'puppeteer';
+import puppeteer, { Browser, Page, ConsoleMessage } from 'puppeteer';
 import { PUPPETEER_OPTIONS, SCRAPING_CONFIG } from '../config/constants';
 import { logger } from './logger';
 
@@ -36,8 +36,9 @@ export class PuppeteerManager {
     });
     
     // Add console logging
-    page.on('console', msg => {
-      if (msg.type() === 'error' || msg.type() === 'warning') {
+    page.on('console', (msg: ConsoleMessage) => {
+      const type = msg.type();
+      if (type === 'error' || type === 'warning') {
         logger.debug('Browser console:', msg.text());
       }
     });
