@@ -94,34 +94,66 @@ export class YouTubeService {
 
       // Wait for video grid and initial content
       logger.info('Waiting for video grid...');
-      await page.waitForSelector('ytd-rich-grid-renderer', { timeout: 10000 });
+      
+      // Wait for both the grid container and the first video
+      await Promise.all([
+        page.waitForSelector('#contents.ytd-rich-grid-renderer', { timeout: 10000 }),
+        page.waitForSelector('ytd-rich-item-renderer', { timeout: 10000 })
+      ]);
+
+      logger.info('Video grid found, waiting for content to load...');
       await this.delay(3000);
 
-      // Scroll a bit to trigger lazy loading
-      await page.evaluate(() => window.scrollBy(0, 500));
+      // Scroll to trigger lazy loading
+      await page.evaluate(() => {
+        window.scrollBy(0, 500);
+      });
+      
       await this.delay(2000);
 
-      // Get latest video details
+      // Debug page content
+      const debug = await page.evaluate(() => {
+        const gridContents = document.querySelector('#contents.ytd-rich-grid-renderer');
+        const videoCount = document.querySelectorAll('ytd-rich-item-renderer').length;
+        const firstVideo = document.querySelector('ytd-rich-item-renderer');
+        
+        return {
+          hasGridContents: !!gridContents,
+          videoCount,
+          firstVideoHtml: firstVideo ? firstVideo.innerHTML : null,
+        };
+      });
+      
+      logger.info(`Debug info: Found ${debug.videoCount} videos, grid contents exists: ${debug.hasGridContents}`);
+
+      // Get latest video details with updated selectors
       const videoDetails = await page.evaluate(() => {
         const firstVideo = document.querySelector('ytd-rich-item-renderer');
         if (!firstVideo) return null;
 
-        const link = firstVideo.querySelector('#video-title');
-        const thumbnail = firstVideo.querySelector('#thumbnail');
+        // Try different possible selectors for title and URL
+        const titleElement = firstVideo.querySelector('a#video-title') || 
+                           firstVideo.querySelector('#video-title') ||
+                           firstVideo.querySelector('h3 a');
+                           
+        const thumbnailElement = firstVideo.querySelector('a#thumbnail[href]') ||
+                                firstVideo.querySelector('a[href*="watch?v="]');
 
-        if (!link || !thumbnail || !(thumbnail instanceof HTMLAnchorElement)) {
-          return null;
-        }
+        if (!titleElement || !thumbnailElement) return null;
+
+        const title = titleElement.textContent?.trim() || '';
+        const url = thumbnailElement.getAttribute('href') || '';
+        const videoId = url.includes('watch?v=') ? url.split('watch?v=')[1]?.split('&')[0] : '';
 
         return {
-          videoId: thumbnail.href.split('v=')[1],
-          title: link.textContent?.trim() || '',
-          url: thumbnail.href
+          videoId,
+          title,
+          url: url.startsWith('http') ? url : `https://www.youtube.com${url}`
         };
       });
 
       if (!videoDetails) {
-        logger.error('No video details found');
+        logger.error('Failed to extract video details. Debug HTML:', debug.firstVideoHtml);
         throw new Error('Failed to extract video details');
       }
 
