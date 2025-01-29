@@ -1,4 +1,3 @@
-// src/services/transcript.service.ts
 import { Page } from 'puppeteer';
 import { PuppeteerManager } from '../utils/puppeteer-manager';
 import { logger } from '../utils/logger';
@@ -10,13 +9,25 @@ export class TranscriptService {
     this.puppeteerManager = PuppeteerManager.getInstance();
   }
 
+  private cleanTranscript(transcript: string): string {
+    return transcript
+      // Remove timestamp patterns (XX:XX)
+      .replace(/\d+:\d+/g, '')
+      // Remove multiple spaces
+      .replace(/\s+/g, ' ')
+      // Clean up any artifacts
+      .replace(/\[.*?\]/g, '')
+      // Trim whitespace
+      .trim();
+  }
+
   private async delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async handleCookieConsent(page: Page): Promise<void> {
     try {
-      const buttonSelector = 'button[aria-label="Accept all"]';
+      const buttonSelector = 'button[aria-label=\"Accept all\"]';
       await page.waitForSelector(buttonSelector, { timeout: 5000 });
       await page.click(buttonSelector);
       await this.delay(1000);
@@ -75,14 +86,12 @@ export class TranscriptService {
       await this.expandDescription(page);
       await this.delay(2000);
 
-      // Try to find the transcript button with multiple selectors
+      // Try to find the transcript button
       logger.info('Looking for transcript button...');
       const transcriptButtonSelectors = [
-        'button[aria-label="Show transcript"]',
+        'button[aria-label=\"Show transcript\"]',
         '#primary-button ytd-button-renderer button',
-        '#button-container ytd-button-renderer button',
-        'ytd-video-description-transcript-section-renderer button',
-        '.ytd-video-description-transcript-section-renderer button'
+        '#button-container ytd-button-renderer button'
       ];
 
       // Try each selector
@@ -96,15 +105,7 @@ export class TranscriptService {
           
           if (button) {
             logger.info(`Found transcript button with selector: ${selector}`);
-            // Click using multiple methods to ensure it works
-            try {
-              await button.click();
-            } catch (e) {
-              await page.evaluate((sel) => {
-                const element = document.querySelector(sel);
-                if (element) element.click();
-              }, selector);
-            }
+            await button.click();
             break;
           }
         } catch (e) {
@@ -115,40 +116,62 @@ export class TranscriptService {
 
       await this.delay(2000);
 
-      // Wait for transcript panel
+      // Wait for transcript panel and extract content
       logger.info('Waiting for transcript panel...');
-      await page.waitForSelector('ytd-transcript-renderer', { timeout: 10000 });
-      await this.delay(1000);
-
+      
+      // Wait for the transcript container
+      await page.waitForSelector('.ytd-transcript-segment-list-renderer', { timeout: 10000 });
+      
       // Extract transcript text
       logger.info('Extracting transcript...');
       const transcript = await page.evaluate(() => {
+        // Debug logging
+        console.log('Starting transcript extraction...');
+        
+        // Get all transcript segments
         const segments = document.querySelectorAll('ytd-transcript-segment-renderer');
-        if (!segments.length) return null;
+        
+        if (!segments || segments.length === 0) {
+          console.log('No transcript segments found');
+          return null;
+        }
 
+        console.log(`Processing ${segments.length} transcript segments`);
         return Array.from(segments)
           .map(segment => {
-            const text = segment.querySelector('#text')?.textContent || '';
-            return text.trim();
+            // Explicitly target only the text content, ignoring timestamps
+            const textElement = segment.querySelector('.segment-text, [class*=\"text\"]:not([class*=\"timestamp\"])');
+            return textElement ? textElement.textContent?.trim() : '';
           })
           .filter(text => text.length > 0)
           .join(' ');
       });
 
       if (!transcript) {
+        logger.error('No transcript segments found');
+        
+        // Debug: Log the page content
+        const debug = await page.evaluate(() => {
+          const container = document.querySelector('.ytd-transcript-segment-list-renderer');
+          return {
+            containerExists: !!container,
+            containerHTML: container ? container.innerHTML : 'Not found',
+            bodyText: document.body.textContent.slice(0, 1000)
+          };
+        });
+        
+        logger.debug('Debug info:', debug);
         throw new Error('No transcript found');
       }
 
-      logger.info('Successfully extracted transcript');
-      return transcript;
+      // Clean the transcript before returning
+      const cleanedTranscript = this.cleanTranscript(transcript);
+      
+      logger.info('Successfully extracted and cleaned transcript');
+      return cleanedTranscript;
 
     } catch (error) {
       logger.error('Error extracting transcript:', error);
-      
-      // Debug: Log the current page content
-      const pageContent = await page.content();
-      logger.debug('Page content at error:', pageContent.slice(0, 1000));
-      
       throw new Error(`Failed to extract transcript: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       await page.close();
