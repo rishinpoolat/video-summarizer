@@ -2,7 +2,7 @@
 import { Page } from 'puppeteer';
 import { PuppeteerManager } from '../utils/puppeteer-manager';
 import { logger } from '../utils/logger';
-import { YOUTUBE_BASE_URL, YOUTUBE_SEARCH_URL, SELECTORS } from '../config/constants';
+import { YOUTUBE_BASE_URL, YOUTUBE_SEARCH_URL } from '../config/constants';
 import { VideoDetails } from '../types/youtube.types';
 
 export class YouTubeService {
@@ -28,6 +28,30 @@ export class YouTubeService {
     }
   }
 
+  private async navigateWithRetry(page: Page, url: string, maxRetries = 3): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.info(`Navigation attempt ${attempt} to ${url}`);
+        await page.goto(url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 60000 
+        });
+        
+        // Wait for network to be idle
+        await this.delay(2000);
+        await page.waitForNetworkIdle({ timeout: 10000 }).catch(() => {
+          logger.debug('Network idle timeout, continuing anyway');
+        });
+        
+        return;
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        logger.warn(`Navigation attempt ${attempt} failed, retrying...`);
+        await this.delay(2000 * attempt); // Exponential backoff
+      }
+    }
+  }
+
   async findChannel(channelName: string): Promise<string | null> {
     const page = await this.puppeteerManager.getPage();
     
@@ -37,7 +61,7 @@ export class YouTubeService {
       const searchUrl = `${YOUTUBE_SEARCH_URL}?search_query=${encodeURIComponent(channelName + " channel")}`;
       logger.info(`Searching for channel: ${searchUrl}`);
       
-      await page.goto(searchUrl, { waitUntil: 'networkidle0' });
+      await this.navigateWithRetry(page, searchUrl);
       await this.handleCookieConsent(page);
 
       // Wait for results
@@ -89,61 +113,77 @@ export class YouTubeService {
       const videosUrl = channelUrl.includes('/videos') ? channelUrl : `${channelUrl}/videos`;
       logger.info(`Navigating to videos page: ${videosUrl}`);
       
-      await page.goto(videosUrl, { waitUntil: 'networkidle0' });
+      await this.navigateWithRetry(page, videosUrl);
       await this.handleCookieConsent(page);
-
-      // Wait for video grid and initial content
+      
       logger.info('Waiting for video grid...');
       
-      // Wait for both the grid container and the first video
-      await Promise.all([
-        page.waitForSelector('#contents.ytd-rich-grid-renderer', { timeout: 10000 }),
-        page.waitForSelector('ytd-rich-item-renderer', { timeout: 10000 })
-      ]);
+      // Try multiple different selectors for video grid
+      const gridSelectors = [
+        'ytd-rich-grid-renderer',
+        '#contents.ytd-rich-grid-renderer',
+        '#primary ytd-rich-grid-renderer',
+        '#contents ytd-rich-item-renderer'
+      ];
+      
+      // Wait for any of the grid selectors
+      await Promise.any(
+        gridSelectors.map(selector => 
+          page.waitForSelector(selector, { timeout: 10000 })
+        )
+      );
 
-      logger.info('Video grid found, waiting for content to load...');
+      logger.info('Initial grid found, waiting for content to load...');
       await this.delay(3000);
 
-      // Scroll to trigger lazy loading
+      // Scroll a bit to trigger lazy loading
       await page.evaluate(() => {
         window.scrollBy(0, 500);
       });
       
       await this.delay(2000);
 
-      // Debug page content
-      const debug = await page.evaluate(() => {
-        const gridContents = document.querySelector('#contents.ytd-rich-grid-renderer');
-        const videoCount = document.querySelectorAll('ytd-rich-item-renderer').length;
-        const firstVideo = document.querySelector('ytd-rich-item-renderer');
-        
-        return {
-          hasGridContents: !!gridContents,
-          videoCount,
-          firstVideoHtml: firstVideo ? firstVideo.innerHTML : null,
-        };
+      // Count videos before extracting
+      const videoCount = await page.evaluate(() => {
+        return document.querySelectorAll('ytd-rich-item-renderer').length;
       });
       
-      logger.info(`Debug info: Found ${debug.videoCount} videos, grid contents exists: ${debug.hasGridContents}`);
+      logger.info(`Found ${videoCount} videos in the grid`);
 
-      // Get latest video details with updated selectors
+      if (videoCount === 0) {
+        logger.error('No videos found in grid');
+        throw new Error('No videos found in grid');
+      }
+
+      // Get latest video details
       const videoDetails = await page.evaluate(() => {
-        const firstVideo = document.querySelector('ytd-rich-item-renderer');
-        if (!firstVideo) return null;
+        const videoRenderers = document.querySelectorAll('ytd-rich-item-renderer');
+        if (!videoRenderers.length) return null;
 
-        // Try different possible selectors for title and URL
-        const titleElement = firstVideo.querySelector('a#video-title') || 
-                           firstVideo.querySelector('#video-title') ||
-                           firstVideo.querySelector('h3 a');
-                           
-        const thumbnailElement = firstVideo.querySelector('a#thumbnail[href]') ||
-                                firstVideo.querySelector('a[href*="watch?v="]');
+        const firstVideo = videoRenderers[0];
+        
+        // Try different title selectors
+        const titleSelectors = ['a#video-title', '#video-title', '#video-title-link'];
+        let titleElement = null;
+        for (const selector of titleSelectors) {
+          titleElement = firstVideo.querySelector(selector);
+          if (titleElement) break;
+        }
 
-        if (!titleElement || !thumbnailElement) return null;
+        // Try different thumbnail/link selectors
+        const linkSelectors = ['a#thumbnail[href]', 'a[href*="watch?v="]'];
+        let linkElement = null;
+        for (const selector of linkSelectors) {
+          linkElement = firstVideo.querySelector(selector);
+          if (linkElement) break;
+        }
+
+        if (!titleElement || !linkElement) return null;
 
         const title = titleElement.textContent?.trim() || '';
-        const url = thumbnailElement.getAttribute('href') || '';
-        const videoId = url.includes('watch?v=') ? url.split('watch?v=')[1]?.split('&')[0] : '';
+        const url = linkElement.getAttribute('href') || '';
+        const videoId = url.includes('watch?v=') ? 
+          url.split('watch?v=')[1]?.split('&')[0] : '';
 
         return {
           videoId,
@@ -153,7 +193,7 @@ export class YouTubeService {
       });
 
       if (!videoDetails) {
-        logger.error('Failed to extract video details. Debug HTML:', debug.firstVideoHtml);
+        logger.error('Failed to extract video details from first item');
         throw new Error('Failed to extract video details');
       }
 
@@ -172,9 +212,8 @@ export class YouTubeService {
     const page = await this.puppeteerManager.getPage();
     try {
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0');
-      await page.goto(channelUrl, { waitUntil: 'networkidle0' });
+      await this.navigateWithRetry(page, channelUrl);
       await this.handleCookieConsent(page);
-      await this.delay(2000);
 
       const channelName = await page.evaluate(() => {
         const selectors = [
