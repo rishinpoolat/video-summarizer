@@ -6,10 +6,15 @@ import { GEMINI_API_KEY } from '../config/environment';
 export class SummaryService {
   private genAI: GoogleGenerativeAI;
   private model: any;
+  private readonly TARGET_WORDS = 500;
 
   constructor() {
     this.genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+  }
+
+  private countWords(text: string): number {
+    return text.trim().split(/\s+/).length;
   }
 
   private chunkTranscript(transcript: string, maxChunkSize: number = 5000): string[] {
@@ -38,10 +43,14 @@ export class SummaryService {
 
   private async summarizeChunk(chunk: string): Promise<string> {
     const prompt = `
-      Please provide a concise summary of this video transcript segment.
-      Focus on key points, main ideas, and important details.
-      Keep the summary clear and well-organized.
-
+      Please analyze this video transcript segment and provide a detailed summary.
+      
+      Your summary should:
+      - Capture key points, important details, and main arguments
+      - Include relevant examples and quotes when appropriate
+      - Maintain clear organization and logical flow
+      - Be detailed enough to contribute to a final summary of approximately 500 words
+      
       Transcript segment:
       ${chunk}
     `;
@@ -83,31 +92,83 @@ export class SummaryService {
         chunks.map(chunk => this.summarizeChunk(chunk))
       );
 
-      // If there's only one chunk, return its summary
+      // If there's only one chunk, ensure it meets the target length
       if (chunkSummaries.length === 1) {
-        return chunkSummaries[0];
+        const singleSummary = chunkSummaries[0];
+        if (this.countWords(singleSummary) < this.TARGET_WORDS) {
+          return this.expandSummary(singleSummary, transcript);
+        }
+        return singleSummary;
       }
 
-      // If there are multiple chunks, generate a final summary
+      // For multiple chunks, generate final summary
       const combinedSummary = chunkSummaries.join('\n\n');
       const finalPrompt = `
-        Please create a cohesive final summary from these segment summaries.
-        Combine the information logically and remove any redundancy.
-        Focus on the main narrative and key points.
-
-        Segment summaries:
+        Generate a comprehensive summary of this video content in approximately 500 words.
+        
+        Guidelines:
+        - Aim for roughly 500 words (a little more or less is fine)
+        - Present a cohesive narrative that flows naturally
+        - Include the most significant points and key details
+        - Use specific examples and quotes where relevant
+        - Organize information logically and clearly
+        - Ensure the summary is both informative and engaging
+        - Maintain appropriate context and connections between ideas
+        
+        Source summaries:
         ${combinedSummary}
       `;
 
       const finalResult = await this.model.generateContent({
         contents: [{ role: 'user', parts: [{ text: finalPrompt }]}],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+        }
       });
 
-      return finalResult.response.text();
+      const summary = finalResult.response.text();
+      const wordCount = this.countWords(summary);
+
+      // If summary is significantly shorter than target, expand it
+      if (wordCount < this.TARGET_WORDS * 0.8) { // 20% margin
+        return this.expandSummary(summary, transcript);
+      }
+
+      return summary;
 
     } catch (error) {
       logger.error('Error generating summary:', error);
       throw new Error('Failed to generate summary: ' + (error as Error).message);
     }
+  }
+
+  private async expandSummary(currentSummary: string, originalTranscript: string): Promise<string> {
+    const expandPrompt = `
+      Please expand this summary to approximately 500 words while maintaining accuracy and natural flow.
+      
+      Guidelines:
+      - Target length: ~500 words (slight variation is acceptable)
+      - Add relevant details and examples from the original content
+      - Maintain clear organization and logical progression
+      - Keep the tone engaging and professional
+      - Ensure all additional content is based on the original transcript
+      
+      Current summary:
+      ${currentSummary}
+      
+      Original content:
+      ${originalTranscript}
+    `;
+
+    const result = await this.model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: expandPrompt }]}],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      }
+    });
+
+    return result.response.text();
   }
 }
