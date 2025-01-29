@@ -36,14 +36,7 @@ async function summarizeVideo(channelInput: string) {
     return {
       success: true,
       data: {
-        channel: {
-          name: channelName || channelInput,
-          url: channelUrl
-        },
-        video: {
-          title: videoDetails.title,
-          url: videoDetails.url
-        },
+        title: videoDetails.title,
         summary
       }
     };

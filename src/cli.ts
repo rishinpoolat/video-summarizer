@@ -37,13 +37,8 @@ async function summarizeLatestVideo(channelInput: string): Promise<void> {
     // Generate summary
     const summary = await summaryService.generateSummary(transcript);
 
-    // Output results
-    console.log('\nVideo Summary:');
-    console.log('=============');
-    console.log(`Channel: ${channelName || channelInput}`);
-    console.log(`Title: ${videoDetails.title}`);
-    console.log(`URL: ${videoDetails.url}`);
-    console.log('\nSummary:');
+    // Output only title and summary
+    console.log(`\nTitle: ${videoDetails.title}\n`);
     console.log(summary);
 
   } catch (error) {
