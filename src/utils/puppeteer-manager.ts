@@ -38,7 +38,7 @@ export class PuppeteerManager {
     // Add console logging
     page.on('console', (msg: ConsoleMessage) => {
       const type = msg.type();
-      if (type === 'error' || type === 'warning') {
+      if (type === 'error' || type === 'warn') {
         logger.debug('Browser console:', msg.text());
       }
     });
