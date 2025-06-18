@@ -8,10 +8,16 @@
     "dev": "bun --watch run src/api/server.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.2",
+    "@google/generative-ai": "^0.24.1",
     "commander": "latest",
+    "dotenv": "^16.5.0",
     "elysia": "latest",
     "node-cron": "latest",
-    "puppeteer": "latest"
+    "openai": "^4.52.7",
+    "puppeteer": "latest",
+    "winston": "^3.17.0",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "bun-types": "latest"

@@ -39,7 +39,7 @@ export const SCRAPING_CONFIG = {
 };
 
 export const PUPPETEER_OPTIONS = {
-  headless: "new",
+  headless: true,
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',

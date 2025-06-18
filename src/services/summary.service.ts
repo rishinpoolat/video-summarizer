@@ -1,18 +1,15 @@
 // src/services/summary.service.ts
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import { logger } from '../utils/logger';
-import { GEMINI_API_KEY } from '../config/environment';
+import { AIService } from './ai.service';
 
 export class SummaryService {
-  private genAI: GoogleGenerativeAI;
-  private model: any;
+  private aiService: AIService;
   private readonly TARGET_WORDS = 500;
   private readonly DELAY_BETWEEN_OPERATIONS = 2000; // 2 seconds between operations
   private readonly MAX_CHUNK_SIZE = 4000; // Reduced chunk size for better reliability
 
   constructor() {
-    this.genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+    this.aiService = new AIService();
   }
 
   private async delay(ms: number): Promise<void> {
@@ -81,27 +78,11 @@ export class SummaryService {
         ${chunk}
       `;
 
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }]}],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.8,
-          maxOutputTokens: 1024,
-        },
-        safetySettings: [
-          {
-            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-        ],
+      return await this.aiService.generateContent(prompt, {
+        temperature: 0.7,
+        maxTokens: 1024,
+        retryCount
       });
-
-      return result.response.text();
 
     } catch (error: any) {
       if (retryCount < 3 && error?.message?.includes('429')) {
@@ -132,15 +113,10 @@ export class SummaryService {
         ${combinedSummary}
       `;
 
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: finalPrompt }]}],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-        }
+      return await this.aiService.generateContent(finalPrompt, {
+        temperature: 0.7,
+        maxTokens: 2048
       });
-
-      return result.response.text();
 
     } catch (error: any) {
       logger.error('Error generating final summary:', error);
