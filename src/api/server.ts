@@ -1,4 +1,7 @@
-import { Elysia, t } from "elysia";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { YouTubeService } from "../services/youtube.service";
 import { TranscriptService } from "../services/transcript.service";
 import { SummaryService } from "../services/summary.service";
@@ -127,134 +130,118 @@ async function summarizeFromVideoUrl(
   }
 }
 
-const app = new Elysia()
-  // Health check endpoint
-  .get("/", () =>
-    createResponse(true, {
-      message: "Video Summarizer API is running",
-      version: "1.0.0",
-      endpoints: {
-        "POST /summarize": "Summarize latest video from YouTube channel",
-        "POST /summarize/video": "Summarize specific YouTube video URL",
-        "GET /health": "Health check endpoint",
-      },
-    })
-  )
+const app = new Hono();
 
-  // Health endpoint
-  .get("/health", () =>
-    createResponse(true, {
-      status: "healthy",
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-    })
-  )
+// Add CORS middleware
+app.use("*", cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowHeaders: ["Content-Type", "Authorization"],
+}));
 
-  // Summarize from channel (latest video)
-  .post(
-    "/summarize",
-    async ({ body, request }): Promise<ApiResponse<SummaryData>> => {
-      const { channel, videoUrl } = body as SummaryRequest;
-      
-      // Enhanced logging for n8n debugging
-      console.log('=== INCOMING REQUEST ===');
-      console.log('Method:', request.method);
-      console.log('URL:', request.url);
-      console.log('Headers:', Object.fromEntries(request.headers.entries()));
-      console.log('Body received:', body);
-      console.log('Body type:', typeof body);
-      console.log('Timestamp:', new Date().toISOString());
-      console.log('========================');
+// Validation schemas
+const summarizeSchema = z.object({
+  channel: z.string().min(1).optional(),
+  videoUrl: z.string().min(1).optional(),
+});
 
-      if (!channel && !videoUrl) {
-        return createResponse<SummaryData>(
-          false,
-          undefined,
-          "Either channel name/URL or video URL is required"
-        );
-      }
+const videoUrlSchema = z.object({
+  url: z.string().min(1),
+});
 
-      if (videoUrl) {
-        return await summarizeFromVideoUrl(videoUrl.trim());
-      }
-
-      if (channel) {
-        return await summarizeFromChannel(channel.trim());
-      }
-
-      return createResponse<SummaryData>(
-        false,
-        undefined,
-        "Invalid request parameters"
-      );
+// Health check endpoint
+app.get("/", (c) => {
+  return c.json(createResponse(true, {
+    message: "Video Summarizer API is running",
+    version: "1.0.0",
+    endpoints: {
+      "POST /summarize": "Summarize latest video from YouTube channel",
+      "POST /summarize/video": "Summarize specific YouTube video URL",
+      "GET /health": "Health check endpoint",
     },
-    {
-      body: t.Object({
-        channel: t.Optional(t.String({ minLength: 1 })),
-        videoUrl: t.Optional(t.String({ minLength: 1 })),
-      }),
-    }
-  )
+  }));
+});
 
-  // Summarize specific video URL
-  .post(
-    "/summarize/video",
-    async ({ body }) => {
-      const { url } = body as { url: string };
+// Health endpoint
+app.get("/health", (c) => {
+  return c.json(createResponse(true, {
+    status: "healthy",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+  }));
+});
 
-      if (!url || !url.trim()) {
-        return createResponse<SummaryData>(
-          false,
-          undefined,
-          "Video URL is required"
-        );
-      }
+// Summarize from channel (latest video)
+app.post("/summarize", zValidator("json", summarizeSchema), async (c) => {
+  const { channel, videoUrl } = c.req.valid("json");
+  
+  // Enhanced logging for n8n debugging
+  console.log('=== INCOMING REQUEST ===');
+  console.log('Method:', c.req.method);
+  console.log('URL:', c.req.url);
+  console.log('Headers:', Object.fromEntries(c.req.raw.headers.entries()));
+  console.log('Body received:', { channel, videoUrl });
+  console.log('Timestamp:', new Date().toISOString());
+  console.log('========================');
 
-      return await summarizeFromVideoUrl(url.trim());
-    },
-    {
-      body: t.Object({
-        url: t.String({ minLength: 1 }),
-      }),
-    }
-  )
+  if (!channel && !videoUrl) {
+    return c.json(createResponse<SummaryData>(
+      false,
+      undefined,
+      "Either channel name/URL or video URL is required"
+    ));
+  }
 
-  // CORS headers for n8n compatibility
-  .all('*', ({ set }) => {
-    set.headers['Access-Control-Allow-Origin'] = '*';
-    set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-    set.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-  })
+  if (videoUrl) {
+    const result = await summarizeFromVideoUrl(videoUrl.trim());
+    return c.json(result);
+  }
 
-  // Handle preflight requests
-  .options('*', () => {
-    return new Response(null, { status: 200 });
-  })
+  if (channel) {
+    const result = await summarizeFromChannel(channel.trim());
+    return c.json(result);
+  }
 
-  // CORS and error handling
-  .onError(({ error, code }) => {
-    logger.error(`API Error [${code}]:`, error);
+  return c.json(createResponse<SummaryData>(
+    false,
+    undefined,
+    "Invalid request parameters"
+  ));
+});
 
-    if (code === "VALIDATION") {
-      return createResponse(false, undefined, "Invalid request format");
-    }
+// Summarize specific video URL
+app.post("/summarize/video", zValidator("json", videoUrlSchema), async (c) => {
+  const { url } = c.req.valid("json");
 
-    return createResponse(false, undefined, "Internal server error");
-  })
+  if (!url || !url.trim()) {
+    return c.json(createResponse<SummaryData>(
+      false,
+      undefined,
+      "Video URL is required"
+    ));
+  }
 
-  .listen({
-    port: 3000,
-    hostname: "0.0.0.0"  // Bind to all interfaces
-  });
+  const result = await summarizeFromVideoUrl(url.trim());
+  return c.json(result);
+});
 
-const hostname = app.server?.hostname || "0.0.0.0";
-const port = app.server?.port || 3000;
+// Error handling
+app.onError((err, c) => {
+  logger.error(`API Error:`, err);
+  return c.json(createResponse(false, undefined, "Internal server error"), 500);
+});
 
-console.log(`🦊 Video Summarizer API is running on:`);
+const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
+export default {
+  port,
+  fetch: app.fetch,
+};
+
+console.log(`🔥 Video Summarizer API is running on:`);
 console.log(`   • http://localhost:${port}`);
 console.log(`   • http://127.0.0.1:${port}`);
 console.log(`   • http://0.0.0.0:${port}`);
-console.log(`   • http://${hostname}:${port}`);
 console.log(`📚 API Documentation available at any of the above URLs`);
 console.log(`🔧 For n8n, try: http://localhost:${port} or http://127.0.0.1:${port}`);
 

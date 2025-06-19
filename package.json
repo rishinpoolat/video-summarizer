@@ -10,9 +10,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.2",
     "@google/generative-ai": "^0.24.1",
+    "@hono/zod-validator": "^0.7.0",
     "commander": "latest",
     "dotenv": "^16.5.0",
-    "elysia": "latest",
+    "hono": "^4.8.0",
     "node-cron": "latest",
     "openai": "^4.52.7",
     "puppeteer": "latest",
