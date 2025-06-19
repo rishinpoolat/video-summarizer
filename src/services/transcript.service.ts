@@ -88,20 +88,34 @@ export class TranscriptService {
 
       // Try to find the transcript button
       logger.info('Looking for transcript button...');
+      
+      // First try direct transcript button
       const transcriptButtonSelectors = [
         'button[aria-label=\"Show transcript\"]',
-        '#primary-button ytd-button-renderer button',
-        '#button-container ytd-button-renderer button'
+        'button[aria-label=\"Transcript\"]',
+        'ytd-button-renderer[is-icon-button] button[aria-label*=\"transcript\"]',
+        'ytd-button-renderer[is-icon-button] button[aria-label*=\"Transcript\"]',
+        'yt-button-shape button[aria-label*=\"transcript\"]',
+        'yt-button-shape button[aria-label*=\"Transcript\"]'
+      ];
+      
+      // Also try "More actions" menu approach
+      const moreActionsSelectors = [
+        'button[aria-label=\"More actions\"]',
+        'button[aria-label=\"More\"]',
+        'ytd-menu-renderer button[aria-label*=\"More\"]',
+        '#top-level-buttons-computed button[aria-label*=\"More\"]'
       ];
 
       let transcriptButtonFound = false;
-      // Try each selector
+      
+      // Try direct transcript button first
       for (const selector of transcriptButtonSelectors) {
         try {
-          logger.info(`Trying selector: ${selector}`);
+          logger.info(`Trying direct transcript selector: ${selector}`);
           const button = await page.waitForSelector(selector, { 
             visible: true,
-            timeout: 5000 
+            timeout: 3000 
           });
           
           if (button) {
@@ -111,13 +125,59 @@ export class TranscriptService {
             break;
           }
         } catch (e) {
-          logger.debug(`Selector ${selector} not found, trying next...`);
+          logger.debug(`Direct selector ${selector} not found, trying next...`);
           continue;
+        }
+      }
+      
+      // If direct button not found, try "More actions" menu
+      if (!transcriptButtonFound) {
+        logger.info('Direct transcript button not found, trying More actions menu...');
+        
+        for (const selector of moreActionsSelectors) {
+          try {
+            logger.info(`Trying more actions selector: ${selector}`);
+            const moreButton = await page.waitForSelector(selector, { 
+              visible: true,
+              timeout: 3000 
+            });
+            
+            if (moreButton) {
+              logger.info(`Found more actions button with selector: ${selector}`);
+              await moreButton.click();
+              await this.delay(1000);
+              
+              // Now look for transcript in the dropdown menu using text content
+              const transcriptMenuItem = await page.evaluate(() => {
+                const menuItems = document.querySelectorAll('tp-yt-paper-item, ytd-menu-service-item-renderer, [role=\"menuitem\"]');
+                for (const item of menuItems) {
+                  const text = item.textContent?.toLowerCase();
+                  if (text && (text.includes('transcript') || text.includes('show transcript'))) {
+                    return item;
+                  }
+                }
+                return null;
+              });
+              
+              if (transcriptMenuItem) {
+                logger.info('Found transcript menu item by text content');
+                await page.evaluate((item) => {
+                  (item as HTMLElement).click();
+                }, transcriptMenuItem);
+                transcriptButtonFound = true;
+              }
+              
+              if (transcriptButtonFound) break;
+            }
+          } catch (e) {
+            logger.debug(`More actions selector ${selector} not found`);
+            continue;
+          }
         }
       }
 
       if (!transcriptButtonFound) {
-        throw new Error('Transcript button not found');
+        throw new Error('Transcript button not found in direct buttons or More actions menu');
       }
 
       await this.delay(2000);
@@ -125,29 +185,92 @@ export class TranscriptService {
       // Wait for transcript panel and extract content
       logger.info('Waiting for transcript panel...');
       
-      // Wait for the transcript container
-      await page.waitForSelector('.ytd-transcript-segment-list-renderer', { timeout: 10000 });
+      // Try multiple selectors for transcript container
+      const transcriptContainerSelectors = [
+        '.ytd-transcript-segment-list-renderer',
+        'ytd-transcript-segment-list-renderer',
+        '[role=\"main\"] ytd-transcript-segment-renderer',
+        '#segments.ytd-transcript-segment-list-renderer',
+        'ytd-engagement-panel-section-list-renderer ytd-transcript-segment-renderer'
+      ];
+      
+      let transcriptContainer = null;
+      for (const selector of transcriptContainerSelectors) {
+        try {
+          logger.info(`Trying transcript container selector: ${selector}`);
+          await page.waitForSelector(selector, { timeout: 5000 });
+          transcriptContainer = selector;
+          logger.info(`Found transcript container with: ${selector}`);
+          break;
+        } catch (e) {
+          logger.debug(`Container selector ${selector} not found`);
+          continue;
+        }
+      }
+      
+      if (!transcriptContainer) {
+        throw new Error('Transcript container not found with any selector');
+      }
       
       // Extract transcript text
       logger.info('Extracting transcript...');
       const transcriptResult = await page.evaluate(() => {
-        const segments = document.querySelectorAll('ytd-transcript-segment-renderer');
+        // Try multiple selectors for transcript segments
+        const segmentSelectors = [
+          'ytd-transcript-segment-renderer',
+          '.ytd-transcript-segment-renderer',
+          '[role=\"button\"] .segment-text',
+          'yt-formatted-string.segment-text'
+        ];
+        
+        let segments: NodeListOf<Element> | null = null;
+        for (const selector of segmentSelectors) {
+          segments = document.querySelectorAll(selector);
+          if (segments && segments.length > 0) {
+            console.log(`Found ${segments.length} segments with selector: ${selector}`);
+            break;
+          }
+        }
         
         if (!segments || segments.length === 0) {
+          console.log('No transcript segments found with any selector');
           return null;
         }
 
         const transcriptTexts: string[] = [];
-        segments.forEach(segment => {
-          const textElement = segment.querySelector('.segment-text, [class*=\"text\"]:not([class*=\"timestamp\"])');
+        segments.forEach((segment, index) => {
+          // Try multiple text selectors within each segment
+          const textSelectors = [
+            '.segment-text',
+            'yt-formatted-string',
+            '.ytd-transcript-segment-renderer .text',
+            '[class*=\"text\"]:not([class*=\"timestamp\"])',
+            'span:not([class*=\"time\"])'
+          ];
+          
+          let textElement = null;
+          for (const textSelector of textSelectors) {
+            textElement = segment.querySelector(textSelector);
+            if (textElement && textElement.textContent?.trim()) {
+              break;
+            }
+          }
+          
           if (textElement && textElement.textContent) {
             const text = textElement.textContent.trim();
-            if (text) {
+            if (text && !text.match(/^\\d+:\\d+$/)) { // Skip timestamp-only text
               transcriptTexts.push(text);
+            }
+          } else {
+            // Fallback: try getting text content directly from segment
+            const directText = segment.textContent?.trim();
+            if (directText && !directText.match(/^\\d+:\\d+$/)) {
+              transcriptTexts.push(directText);
             }
           }
         });
 
+        console.log(`Extracted ${transcriptTexts.length} text segments`);
         return transcriptTexts.length > 0 ? transcriptTexts.join(' ') : null;
       });
 

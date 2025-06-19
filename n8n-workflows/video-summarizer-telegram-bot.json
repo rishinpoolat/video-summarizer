@@ -1,0 +1,439 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "ff96d093-2540-4a98-9cd5-feb86bf41fc5",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [-1600, -80],
+      "webhookId": "auto-generated-webhook-id",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/start",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c96a8f6c-9b46-4399-9125-102da13d037b",
+      "name": "Check Start Command",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-1380, -80]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "🎬 Welcome to Video Summarizer Bot!\n\n📝 Send me a YouTube channel name or URL and I'll summarize their latest video for you.\n\nExamples:\n• Fireship\n• TechWorld with Nana\n• https://www.youtube.com/@channel\n\n🔊 You'll receive both text and audio summaries!\n\nJust send the channel name to get started! 🚀",
+        "additionalFields": {}
+      },
+      "id": "332abb69-bae3-4ef5-b367-9847eb2723e7",
+      "name": "Send Welcome Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [-1160, -180],
+      "webhookId": "c4ebcf5d-c61a-4e6c-953e-4f63a0621512",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/start",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2ec13ce4-1f1b-402a-a49e-63fdea70e690",
+      "name": "Check Channel Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-1160, 40]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "=🔄 Processing your request for: `{{ $json.message.text }}`\n\nThis might take a few moments...",
+        "additionalFields": {}
+      },
+      "id": "d7a0e1ac-61a3-4529-9b6b-160db5b017de",
+      "name": "Send Processing Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [-940, 40],
+      "webhookId": "b7b40699-f834-46c3-b28c-ef3b54485d6e",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://a784-82-11-210-131.ngrok-free.app/summarize",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "channel",
+              "value": "={{ $('Check Channel Request').item.json.message.text }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1200000
+        }
+      },
+      "id": "b1c7d5c0-a9cb-4cb4-8780-41f82b03f0dd",
+      "name": "Call Video Summarizer API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-720, 40],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9f09f202-e63b-4dad-8208-f5c4f63ca6fe",
+      "name": "Check API Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-500, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the summary text for better readability\nconst data = $input.first().json.data;\nconst title = data.title;\nconst summary = data.summary;\nconst videoUrl = data.videoUrl;\nconst channelName = data.channelName || 'Unknown Channel';\n\n// Create formatted message\nconst formattedMessage = `🎬 **${title}**\\n\\n📺 Channel: ${channelName}\\n\\n📝 **Summary:**\\n${summary}\\n\\n🔗 [Watch Video](${videoUrl})`;\n\n// Clean up summary for TTS (remove markdown, emojis, and format for speech)\nconst cleanSummary = summary\n  .replace(/\\*\\*/g, '') // Remove bold markdown\n  .replace(/\\*/g, '') // Remove italic markdown\n  .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // Remove links, keep text\n  .replace(/[🎬📺📝🔗🎯🚀💡⚡🔄]/g, '') // Remove common emojis\n  .replace(/\\n+/g, ' ') // Replace newlines with spaces\n  .replace(/\\s+/g, ' ') // Replace multiple spaces with single space\n  .trim();\n\nreturn {\n  chatId: $input.first().json.message?.chat?.id || $input.first().json.chat?.id,\n  formattedMessage,\n  cleanSummary,\n  title: title.replace(/[^a-zA-Z0-9\\s]/g, '').substring(0, 50) // Clean title for filename\n};"
+      },
+      "id": "dced689c-ba35-4901-9ac4-501952f45955",
+      "name": "Format Summary Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-280, -80]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Send Processing Message').item.json.result.chat.id }}",
+        "text": "{{ $json.formattedMessage }}",
+        "additionalFields": {}
+      },
+      "id": "3cfb80f9-886c-4244-95db-0c810a7bd01d",
+      "name": "Send Text Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [-60, -180],
+      "webhookId": "dded7379-08b5-4867-8f81-39880e8c060c",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $vars.ELEVENLABS_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{}]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "4464e3d2-81e2-42fb-bf06-d7e5db64e5be",
+      "name": "Generate Audio with ElevenLabs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-60, 40]
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ $('Format Summary Response').item.json.chatId }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "🔊 Audio summary of the video",
+          "title": "{{ $('Format Summary Response').item.json.title }} - Audio Summary"
+        }
+      },
+      "id": "e6d1ea89-d7cf-42f4-be03-d2368fe47e59",
+      "name": "Send Audio Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [160, 40],
+      "webhookId": "6dd867fe-16b5-416a-8e3c-8b721de50296",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Check Start Command').item.json.message.chat.id }}",
+        "text": "=❌ **Error occurred while processing your request:**Please try again with a different channel name or check if the channel exists.or try again after sometime",
+        "additionalFields": {}
+      },
+      "id": "74bc1754-530d-48ff-9440-12bc36994d45",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [-360, 180],
+      "webhookId": "7f96dc18-2c1b-4b06-992d-6c07db3f661f",
+      "credentials": {
+        "telegramApi": {
+          "id": "QjpHscm1ITsIKIPR",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/audio/speech",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $vars.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{}]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "316d9aa1-7d08-40f2-9662-32fea6466e29",
+      "name": "Generate Audio with OpenAI TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-60, 240]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Start Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Start Command": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Channel Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Channel Request": {
+      "main": [
+        [
+          {
+            "node": "Send Processing Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Processing Message": {
+      "main": [
+        [
+          {
+            "node": "Call Video Summarizer API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Video Summarizer API": {
+      "main": [
+        [
+          {
+            "node": "Check API Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Success": {
+      "main": [
+        [
+          {
+            "node": "Format Summary Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Summary Response": {
+      "main": [
+        [
+          {
+            "node": "Send Text Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Audio with ElevenLabs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Audio with OpenAI TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Audio with ElevenLabs": {
+      "main": [
+        [
+          {
+            "node": "Send Audio Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a6f65d741ac8c93aa6a2bcdeb74a6c6402822e1d4f75803fa9d6c036c2a9411d"
+  }
+}
